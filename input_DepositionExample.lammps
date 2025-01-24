@@ -1,7 +1,5 @@
-# This LAMMPS input script simulates surface tension measurement of water
-# Written by Simon Gravelle (https://simongravelle.github.io/)
-# Find more scripts here: https://github.com/simongravelle/lammps-input-files
-# LAMMPS tutorials for beginners: https://lammpstutorials.github.io/
+# This simulates the deposition of Water, Methane, Water, Nitrogen, and Water again 
+# in a "sandwich" configuration at 273 Kelvin on a Gold Spacecraft Surface in Vacuum
 
 variable T equal 273.15 # temperature in Kelvin
 variable Tgold equal 0.15 # temperature in Kelvin
