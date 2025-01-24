@@ -1,0 +1,313 @@
+# Load in saved force fields, regions, etc. 
+variable T equal 273.15 # temperature in Kelvin
+variable Tgold equal 73.15 # temperature in Kelvin
+variable A2m equal 1e-10 # Angstrom to meter
+variable atm2Pa equal 101325 # Atmosphere to Pascal
+variable N2mN equal 1e3 # Newton to milliNewton
+
+#-------- Define Simulation Variables (for gold and for sim box) ------
+variable fccAu equal 4.065 	# Lattice Constant for FCC Au (Gold) Lattice
+variable L0 equal ${fccAu}*24 # Added in for the larger simulation to define height of sim box (intermediate region is evaporative region)
+variable L000 equal ${fccAu}*3.5#10 # Added in for the larger simulation to define height of sim box (intermediate region is evaporative region)
+variable L1 equal ${fccAu}*4 	# # Deprecated # The + z height of the simulation box
+variable L11 equal ${fccAu}*3   # The -z height of the simulation box + lower z-boundary for bottom gold *2*3.4
+variable L2 equal ${fccAu}*1.5 	# +/- x for simulation box + size of x-direction gold cube sides
+variable L4 equal ${fccAu}*1	# Height of the Gold Slab (e.g. -L4 = upper boundary)
+variable L3 equal ${fccAu}*1.5 	# +/- y for simulation box + gold slab
+variable L5 equal ${fccAu}*2.75  # lower z-boundary for middle gold region + dynamic_gold region / upper for bottom gold
+variable L6 equal ${fccAu}*1.75	# Upper Z-Boundary for middle-gold region / Lower for top layer
+variable LD equal ${fccAu}*1.5 # -z boundary for water molecule deposition region
+variable UD equal ${fccAu}*2.0 # +z boundary for water molecule deposiiton region
+variable UDD equal ${fccAu}*0.0 # +z boundary for water molecule deposiiton region
+# -------- Maybe delete here??? ------------
+variable Ti equal 5.00 	# Initial temperature of the simulation (in Kelvin) 
+variable Tf equal 5.00 	# final temperature of the simulation (in Kelvin) 
+boundary p p p
+units metal
+atom_style full
+bond_style harmonic
+angle_style harmonic
+
+# Load the system from the saved data
+read_data adsorption_state_47Waters_Nov15_Settled_150K.data extra/special/per/atom 6
+
+pair_style hybrid sw lj/cut/tip4p/long 1 2 1 1 0.1577 12.0 eam/fs morse 12.0 lj/cut 12.0
+kspace_style pppm/tip4p 1.0e-2 # Can use hybrid? -- for non tip4p pppm/gpu? 
+pair_modify shift yes mix arithmetic
+print "Place 1"
+#lattice sc 3.4
+
+region box block -${L2} ${L2} -${L3} ${L3} -${L11} ${L0}
+region fluid block -3 3 -3 3 -3 3
+region depositionregion block -${L2} ${L2} -${L3} ${L3} 6.0 ${UD}
+region cube block -${L2} ${L2} -${L3} ${L3} -${L11} -${L4} # Gold
+# Define the bottom layer of the gold atoms (to fix)
+region cube_bottomHalf block -${L2} ${L2} -${L3} ${L3} -${L11} -${L5}
+# Thermostat/Heat-Bath the middle 1-2 layers of Gold Atoms
+region middlegold block -${L2} ${L2} -${L3} ${L3} -${L5} -${L6}
+
+region ljwall block -${L2} ${L2} -${L3} ${L3} ${UDD} ${L000}
+
+include PARM.lammps
+
+molecule h2omol tip4p-ice.mol
+molecule CH4mol MethaneCH4.mol
+molecule N2mol N2.mol
+print "Place 2"
+#dump verifyIDs_before all custom 1 verify_before.dump id type mol
+
+##reset_atom_ids # Reset atom ids so that PLUMED doesn't throw an error! 
+#reset_atoms mol all
+##reset_atoms id
+
+#group dummy_atoms type 7
+#fix freeze_dummy dummy_atoms setforce 0.0 0.0 0.0
+
+# Define groups for water molecules in different regions
+group fluidWater region fluid
+group depositionWater region depositionregion
+
+group		bottomGold region cube_bottomHalf
+#group nonfixed region nonfixed
+group gold type 3
+group cube region cube
+#group nonfixed_gold region nonfixed_gold
+
+# Group (command) to group the Gold Atoms (By Atom Type, NOT region)
+group gold_substrate type 3
+
+# Group methane 
+group           CH4 type 4  5
+
+# Group nitrogen 
+group N2 type 6
+
+# Group to represent only the dynamic part of the gold substrate
+group dynamic_gold subtract gold_substrate bottomGold
+print "Place 3"
+# Compute temperature only for the dynamic gold atoms (Exclude the stationary/fixed bottom gold atoms from messing up the temperature output)
+compute dyn_temp dynamic_gold temp
+
+# Define the region where the water molecules will appear (top half of the sim box here)
+region          slab block -${L2} ${L2} -${L3} ${L3} ${LD} ${UD}
+
+region mobile block -${L2} ${L2} -${L3} ${L3} -${L5} ${UD} # Make everything except for bottom layer of Gold mobile
+group mobile region mobile
+
+group middlegold region middlegold
+
+group top_gold subtract dynamic_gold middlegold
+compute top_temp top_gold temp
+
+# Group the water molecules together 
+group watermolecules type 1 2
+
+##reset_atom_ids # Reset atom ids so that PLUMED doesn't throw an error! 
+#reset_atoms id
+###reset_atoms mol all
+#reset_atoms id
+
+group rigidmolecules type 1 2 6  # Type 1, 2 for water (O, H), and 6 for nitrogen
+fix myshk rigidmolecules shake 1.0e-4 200 0 b 1 2 a 1 mol h2omol mol N2mol
+fix mynve all nve
+####fix mynvt all nvt temp 250.0 250.0 0.005
+
+timestep 0.0008 # 0.002 picoseconds = 2.0 femtoseconds
+# freeze bottom layer of gold atoms
+fix freeze_gold bottomGold setforce 0.0 0.0 0.0
+print "Place 4"
+dump 1000 all xyz 1000 xyzdata_TGATest_150k_Dec23.xyz
+# output and run
+# first : generate the outgassing molecules and let them deposit onto the substrate
+thermo 100
+
+#compute total_pe all pe
+#compute water_pe watermolecules pe
+
+#thermo_style custom step temp c_dyn_temp c_top_temp c_total_pe epair etotal press # c_total_pe c_pair_energy
+
+
+print "Place 5"
+#----------------------------------------NEW FILE---------------------------------------
+
+compute mdtemp CH4 temp
+compute_modify mdtemp dynamic/dof yes
+compute TempEdit CH4 temp
+compute_modify TempEdit dynamic/dof yes
+
+compute per_atom_pe all pe/atom # Potential Energy for each atom dumped every 10
+compute pair_energy watermolecules group/group gold_substrate # Pair energy for water and gold
+
+# Compute total per-atom potential energy
+compute total_pe all reduce sum c_per_atom_pe
+
+# Thermo output
+thermo_style custom step temp c_dyn_temp c_top_temp epair etotal press c_total_pe # c_pair_energy
+#####thermo 100 # Commented out Oct 25 2024
+
+#unfix mylan1
+
+#create_atoms 0 random 100 12345 depositionregion mol h2omol 25367 overlap 5.0
+
+#unfix mynve1
+#fix mynve all nve
+
+# Define a group for the water molecule based on the region
+group waterMolecule region depositionregion
+# Compute the z-component of velocity
+compute myVelZ waterMolecule property/atom vz
+# ^^ Need to define this before the loop at least once! 
+
+
+print "Place 6"
+
+# longer run for surface tension measurement
+#run 5000
+
+#-----Begin Loop-------------------------------------------------
+#
+# Define a variable for the loop counter
+#variable i loop 0
+#
+#label loop_start  # Start of the loop
+#
+#variable number equal ceil(random(1,1000000000,10)/100000.0)
+#print ${number}
+#print ${number}
+#print ${number}
+#print ${number}
+#print ${number}
+#print ${number}
+#
+#variable number2 equal ceil(random(1,1000,224087309))
+#variable randd equal ${number2}
+#print "Rand ="
+#print ${randd}
+#
+# Define a random seed based on the current time for atom placement and velocity
+#variable seed_atoms equal ceil(7.30908240211201999*${number})  # For create_atoms
+#variable seed_velocity equal ceil(7.11302330908240211201999*${number})  # For velocity
+#
+# Print "Hello World" with the current iteration number
+#print "Hello World - Iteration ${i}"
+#
+#print ${seed_atoms}
+#
+#if "${randd} < 960" then "create_atoms 0 random 1 ${seed_atoms} depositionregion mol h2omol #25367"
+#if "${randd} >= 960 && ${randd} < 980" then "create_atoms 0 random 1 ${seed_atoms} #depositionregion mol N2mol 25368"
+#if "${randd} >= 980" then "create_atoms 0 random 1 ${seed_atoms} depositionregion mol CH4mol #25369"
+#
+#
+#
+#unfix myshk
+#group rigidmolecules type 1 2 6  # Type 1, 2 for water (O, H), and 6 for nitrogen
+#fix myshk rigidmolecules shake 1.0e-5 200 0 b 1 2 a 1 mol h2omol mol N2mol
+#
+#run 0
+#
+#group depositionWater region depositionregion
+#velocity depositionWater create ${T} ${seed_velocity} mom no rot yes dist gaussian
+## ---- New Stuff! -----
+#
+## Define a group for the water molecule based on the region
+#group waterMolecule region depositionregion
+#
+## Compute the z-component of velocity
+##compute myVelZ waterMolecule property/atom vz
+#
+##unfix myshk
+##fix myshk rigidmolecules shake 1.0e-5 200 0 b 1 2 a 1 mol h2omol mol N2mol
+#
+# Run 0 to compute the velocity without advancing the simulation
+#run 0
+#
+# Assign negative z-velocity
+# Get the current velocity and then set it to negative
+#variable vz equal abs(c_myVelZ[1])  # Access the first atom's z-velocity
+#
+# Define a new variable for the negative z-velocity
+##variable neg_vz equal -${vz}
+#
+# Set the z-velocity to negative of current
+#velocity waterMolecule set NULL NULL ${neg_vz}
+#
+#run 10000
+#
+## Move to the next iteration
+#next i
+#
+## Jump back to the loop start, if the loop isn't finished
+#jump SELF loop_start
+#
+## After the loop is done, the script continues here
+#
+##---End Loop-------------------------------------------------------
+## ----- LOOP SHOULDN'T BE USED IN TGA ONLY FILE ------
+
+
+
+
+# ----- This code only for CARC to re-run code automatically every 2 days -----
+
+# Define a variable to hold the text "success"
+variable message string "success"
+
+# Use fix print to write "success" to the file three times
+fix myPrint all print 1 "${message}" file check_me.txt screen no
+#print("Printing!!!!")
+# Run for 3 timesteps to print "success" three times
+#run 3
+
+# Unfix to stop printing after three lines
+unfix myPrint
+
+print "Place 7"
+# ----------- Stage 2: TGA -----------
+
+# Define the exit region (e.g. where the molecules will leave the system if they enter it) 
+region exitregion block -${L2} ${L2} -${L3} ${L3} 15 ${L0}
+group water_mols type 1 2
+group mW_water type 8
+#fix evaporate_water water_mols evaporate 1 1 exitregion 12345 molecule yes
+#fix evaporate_CH4 CH4 evaporate 1 1 exitregion 12345 molecule yes
+#fix evaporate_nitrogen N2 evaporate 1 1 exitregion 12345 molecule yes
+#fix evaporate_mW mW_water evaporate 1 1 exitregion 12345
+
+#unfix mylan_new 
+#fix mylan_new all temp/berendsen 73.15 500.15 0.005 #740924
+#fix mylan_new middlegold temp/berendsen 750.0 750.0 0.005 # 740924
+fix mylan_new all temp/berendsen 150.0 150.0 0.05 # 740924
+#########fix pressfix all press/berendsen iso 1.3158e-9 1.3158e-9 0.005
+
+print "Placeeeeeeeeeeeeeeeee 8"
+
+fix plumed all plumed plumedfile plumed.dat outfile plumed.out
+# Moved fix plumed to second run so that I can ramp system to 150K (or whatever temperature) first! 
+
+print "Placeeeeeeeeeeeeeeeee 9"
+
+# freeze bottom layer of gold atoms
+unfix freeze_gold
+fix freeze_gold bottomGold setforce 0.0 0.0 0.0
+
+# Optional command to delete any atoms above the substrate region / deposited particles 
+
+#run 5000000
+
+
+run 200000000000000
+
+##unfix mylan_new 
+##fix mylan_new middlegold temp/berendsen 73.15 500.0 0.005 # 740924
+######fix pressfix all press/berendsen iso 1.3158e-9 1.3158e-9 0.005
+
+###unfix mynvt 
+###fix mynvt all nvt temp 250.0 250.0 0.005
+
+### freeze bottom layer of gold atoms
+##unfix freeze_gold
+##fix freeze_gold bottomGold setforce 0.0 0.0 0.0
+
+##run 200 #100000 # 10000000000
+
+
