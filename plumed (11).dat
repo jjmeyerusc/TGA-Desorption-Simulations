@@ -1,0 +1,41 @@
+# Load the TIP4P Molecule File
+MOLINFO STRUCTURE=tip4p_ice.pdb
+
+# Define the reference point at Z = 0 using a fixed dummy atom
+fixed_point: FIXEDATOM AT=0,0,0
+
+# Define the group of gaseous molecules (anything greator than Z=11.5 Angstroms or 1.15 nm; w/o ramp)
+#gas_molecules: ZDISTANCES GROUPA=fixed_point GROUPB=91-216:3 MORE_THAN={RATIONAL R_0=3.15 D_0=3.15} NOPBC
+
+# Define a constant CV with value 1.0 (for debugging purposes only!) 
+#gas_molecules: CONSTANT VALUES=1.0  # (for debugging purposes only!!)
+
+# Define the group of gaseous molecules with a ramp and upper threshold
+#gas_molecules: ZDISTANCES GROUPA=fixed_point GROUPB=91-216:3 BETWEEN={GAUSSIAN LOWER=1.5 UPPER=3.0} NOPBC #MORE_THAN={RATIONAL R_0=1.5} NOPBC
+
+#combined: COMBINE ARG=gas_molecules.between,gas_molecules.morethan COEFFICIENTS=1,1 PERIODIC=NO
+
+# Define gold and water atoms for the coordination number calculation
+coord_water: COORDINATIONNUMBER SPECIESA=91-216:3 SPECIESB=1-90,91-216:3 R_0=0.3 D_0=0.05 LESS_THAN={RATIONAL R_0=0.75 D_0=0.25} MORE_THAN={RATIONAL R_0=0.5} NOPBC
+
+# Add Metadynamics
+metad: METAD ARG=coord_water.lessthan PACE=400 HEIGHT=40.0802 SIGMA=0.05 FILE=HILLS # GRID_MIN=0 GRID_MAX=42 # BIASFACTOR=8 TEMP=73.15
+
+#-------Force everything above the substrate region to stay in the gas phase------
+#----
+#----------------------Prevents "Transient Molecular Clustering"------------------
+#----
+# Define a group for water molecules in the region z > 11.5 Å
+#gas_molecules: ZDISTANCES GROUPA=fixed_point GROUPB=91-216:3 MORE_THAN={RATIONAL R_0=1.15} NOPBC
+# Calculate pairwise distances only for gas-phase water molecules
+#gas_distances: DISTANCES GROUPA=gas_molecules GROUPB=gas_molecules NOPBC
+
+# Debugging: Print gas_molecules to the command line
+#PRINT ARG=gas_molecules.morethan FILE=none STRIDE=1
+
+# Add a restraint to keep distances above a threshold (e.g., 10.0 Å)
+#min_distance_wall: LOWER_WALLS ARG=gas_distances.* ALL AT=1.0 KAPPA=100000.0 
+
+
+# Print the outputs
+PRINT ARG=coord_water.lessthan,coord_water.morethan STRIDE=100 FILE=COLVAR
